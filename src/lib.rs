@@ -8,7 +8,10 @@ use core::{
     task::{Context, Poll},
 };
 
-use futures_core::{future::FusedFuture, ready};
+use futures_core::{
+    future::{FusedFuture, TryFuture},
+    ready,
+};
 use pin_project::pin_project;
 
 /// Future for [`with_try_background`][FutureExt::with_try_background]
@@ -22,12 +25,16 @@ pub struct TryForegroundBackground<F, B> {
     background: B,
 }
 
-impl<F, B, E> Future for TryForegroundBackground<F, B>
+fn assert_future<F: Future>(fut: F) -> F {
+    fut
+}
+
+impl<F, B> Future for TryForegroundBackground<F, B>
 where
     F: Future,
-    B: Future<Output = Result<(), E>> + FusedFuture,
+    B: TryFuture<Ok = ()> + FusedFuture,
 {
-    type Output = Result<F::Output, E>;
+    type Output = Result<F::Output, B::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -35,7 +42,7 @@ where
         match this.foreground.poll(cx) {
             Poll::Ready(value) => Poll::Ready(Ok(value)),
             Poll::Pending if this.background.is_terminated() => Poll::Pending,
-            Poll::Pending => match ready!(this.background.poll(cx)) {
+            Poll::Pending => match ready!(this.background.try_poll(cx)) {
                 Ok(()) => Poll::Pending,
                 Err(err) => Poll::Ready(Err(err)),
             },
@@ -152,9 +159,9 @@ pub trait FutureExt: Sized + Future {
     where
         B: Future<Output = ()> + FusedFuture,
     {
-        ForegroundBackground {
+        assert_future(ForegroundBackground {
             inner: self.with_try_background(NeverError { fut: background }),
-        }
+        })
     }
 
     /**
@@ -231,14 +238,14 @@ pub trait FutureExt: Sized + Future {
     ```
     */
     #[must_use = "futures do nothing unless you `.await` or poll them"]
-    fn with_try_background<B, E>(self, background: B) -> TryForegroundBackground<Self, B>
+    fn with_try_background<B>(self, background: B) -> TryForegroundBackground<Self, B>
     where
-        B: Future<Output = Result<(), E>>,
+        B: TryFuture<Ok = ()> + FusedFuture,
     {
-        TryForegroundBackground {
+        assert_future(TryForegroundBackground {
             foreground: self,
             background,
-        }
+        })
     }
 }
 
