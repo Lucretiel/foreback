@@ -87,6 +87,16 @@ where
     }
 }
 
+impl<F, B> FusedFuture for ForegroundBackground<F, B>
+where
+    F: FusedFuture,
+    B: Future<Output = ()> + FusedFuture,
+{
+    fn is_terminated(&self) -> bool {
+        self.inner.foreground.is_terminated()
+    }
+}
+
 /**
 Extension trait for [`Future`] providing adapters to run other futures
 concurrently in the background.
