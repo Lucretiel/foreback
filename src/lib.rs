@@ -1,17 +1,20 @@
 #![no_std]
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+/*!
+Foreback provides some future adapters for driving background work concurrently
+with foreground work. See [`FutureExt`] for details.
+*/
 
 use core::{
     convert::Infallible,
     future::Future,
     pin::Pin,
+    task::ready,
     task::{Context, Poll},
 };
 
-use futures_core::{
-    future::{FusedFuture, TryFuture},
-    ready,
-};
+use futures_core::future::{FusedFuture, TryFuture};
 use pin_project::pin_project;
 
 /// Future for [`with_try_background`][FutureExt::with_try_background]
@@ -25,8 +28,16 @@ pub struct TryForegroundBackground<F, B> {
     background: B,
 }
 
+#[must_use]
+#[inline(always)]
 fn assert_future<F: Future>(fut: F) -> F {
     fut
+}
+
+#[must_use]
+#[inline(always)]
+fn unwrap_infallible<T>(res: Result<T, Infallible>) -> T {
+    res.expect("can never be Infallible")
 }
 
 impl<F, B> Future for TryForegroundBackground<F, B>
@@ -60,6 +71,7 @@ struct NeverError<F> {
 impl<F: Future> Future for NeverError<F> {
     type Output = Result<F::Output, Infallible>;
 
+    #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.project().fut.poll(cx).map(Ok)
     }
@@ -86,11 +98,9 @@ where
 {
     type Output = F::Output;
 
+    #[inline(always)]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().inner.poll(cx).map(|res| match res {
-            Ok(value) => value,
-            Err(infallible) => match infallible {},
-        })
+        self.project().inner.poll(cx).map(unwrap_infallible)
     }
 }
 
@@ -155,6 +165,7 @@ pub trait FutureExt: Sized + Future {
     ```
     */
     #[must_use = "futures do nothing unless you `.await` or poll them"]
+    #[inline]
     fn with_background<B>(self, background: B) -> ForegroundBackground<Self, B>
     where
         B: Future<Output = ()> + FusedFuture,
@@ -238,6 +249,7 @@ pub trait FutureExt: Sized + Future {
     ```
     */
     #[must_use = "futures do nothing unless you `.await` or poll them"]
+    #[inline]
     fn with_try_background<B>(self, background: B) -> TryForegroundBackground<Self, B>
     where
         B: TryFuture<Ok = ()> + FusedFuture,
